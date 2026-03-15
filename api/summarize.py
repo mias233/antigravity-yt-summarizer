@@ -1,8 +1,9 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import re
-from youtube_transcript_api import YouTubeTranscriptApi
+import youtube_transcript_api
 import google.generativeai as genai
+import traceback
 
 # Hardcoded API Key provided by the user
 api_key = "AIzaSyDLNs8RHW0ZZF7a17gIZrL_Y1X82qbY_2o"
@@ -38,7 +39,8 @@ class handler(BaseHTTPRequestHandler):
             
         try:
             # 1. Extract Transcript
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            # Using absolute reference to avoid attribute errors
+            transcript_list = youtube_transcript_api.YouTubeTranscriptApi.list_transcripts(video_id)
             
             # Helper to extract text
             def get_text(t_fetch):
@@ -144,6 +146,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(response_json.encode('utf-8'))
             
         except Exception as e:
+            traceback.print_exc()
             error_msg = str(e)
             if "TranscriptsDisabled" in error_msg or "Subtitles are disabled" in error_msg or "No transcripts" in error_msg or "Could not retrieve a transcript" in error_msg:
                 error_msg = "The creator of this video has disabled third-party transcript access, or no subtitles exist. Please try a different video."
