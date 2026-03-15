@@ -10,7 +10,7 @@ genai.configure(api_key=api_key)
 
 def extract_video_id(url):
     """Extract YouTube video ID from various URL formats."""
-    pattern = r'(?:v=|/)([0-9A-Za-z_-]{11}).*'
+    pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
     match = re.search(pattern, url)
     return match.group(1) if match else None
 
@@ -38,7 +38,25 @@ class handler(BaseHTTPRequestHandler):
             
         try:
             # 1. Extract Transcript
-            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US', 'en-GB'])
+            try:
+                # Fast path: Try common English codes first
+                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US', 'en-GB', 'en-IN', 'en-CA'])
+            except:
+                # Fallback: List all transcripts, pick the first one, and translate to English
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                available_tracks = [t for t in transcript_list]
+                
+                if not available_tracks:
+                    raise Exception("No transcripts found at all.")
+                
+                first_track = available_tracks[0]
+                
+                if first_track.language_code.startswith('en'):
+                    transcript = first_track.fetch()
+                else:
+                    # Translate non-English transcript to English using YouTube's built-in translation
+                    transcript = first_track.translate('en').fetch()
+
             # Format transcript to text
             transcript_text = " ".join([t['text'] for t in transcript])
             
@@ -69,7 +87,7 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             error_msg = str(e)
             if "Subtitles are disabled" in error_msg or "No transcripts" in error_msg or "Could not retrieve a transcript" in error_msg:
-                error_msg = "This video does not have accessible English subtitles or transcripts available."
+                error_msg = "This video does not have ANY accessible subtitles or transcripts available. YouTube requires at least one caption track to process it."
             else:
                 error_msg = f"An error occurred: {error_msg}"
                 
