@@ -10,7 +10,7 @@ genai.configure(api_key=api_key)
 
 def extract_video_id(url):
     """Extract YouTube video ID from various URL formats."""
-    pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
+    pattern = r'(?:v=|/)([0-9A-Za-z_-]{11}).*'
     match = re.search(pattern, url)
     return match.group(1) if match else None
 
@@ -77,7 +77,7 @@ class handler(BaseHTTPRequestHandler):
             Note: The transcript might be in a foreign language. YOU MUST PROCESS IT AND OUTPUT YOUR RESPONSE IN ENGLISH.
             
             1. First, provide a concise, well-formatted summary of the key takeaways IN ENGLISH using bullet points.
-            2. Then, generate exactly 3 insightful follow-up prompts or questions IN ENGLISH that the user can ask you to dive deeper into the video's topic. Format them clearly under the heading \"### Follow-up Prompts\".
+            2. Then, generate exactly 3 insightful follow-up prompts or questions IN ENGLISH that the user can ask you to dive deeper into the video's topic. Format them clearly under the heading "### Follow-up Prompts".
             
             Transcript:
             {transcript_text}
@@ -95,8 +95,12 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(response_json.encode('utf-8'))
             
         except Exception as e:
-            import traceback
-            error_msg = traceback.format_exc()
+            error_msg = str(e)
+            if "TranscriptsDisabled" in error_msg or "Subtitles are disabled" in error_msg or "No transcripts" in error_msg or "Could not retrieve a transcript" in error_msg:
+                error_msg = "The creator of this video has disabled third-party transcript access, or no subtitles exist. Please try a different video."
+            else:
+                error_msg = f"An error occurred: {error_msg}"
+                
             self.send_error_response(500, error_msg)
             
     def do_OPTIONS(self):
