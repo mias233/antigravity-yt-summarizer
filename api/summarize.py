@@ -31,27 +31,22 @@ class handler(BaseHTTPRequestHandler):
             
         transcript_text = None
         try:
-            # TRY 1: list_transcripts
+            # TRY Extraction
             try:
                 ts = YouTubeTranscriptApi.list_transcripts(video_id)
                 try:
-                    transcript_text = " ".join([i['text'] for i in ts.find_manually_created_transcript(['en', 'en-US']).fetch()])
+                    transcript_text = " ".join([i['text'] for i in ts.find_manually_created_transcript(['en']).fetch()])
                 except:
-                    try:
-                        transcript_text = " ".join([i['text'] for i in ts.find_generated_transcript(['en']).fetch()])
-                    except:
-                        transcript_text = " ".join([i['text'] for i in list(ts)[0].fetch()])
+                    transcript_text = " ".join([i['text'] for i in list(ts)[0].fetch()])
             except:
-                # TRY 2: get_transcript
                 try:
                     transcript_text = " ".join([i['text'] for i in YouTubeTranscriptApi.get_transcript(video_id)])
                 except:
-                    # TRY 3: Scraper
                     import urllib.request
                     import html
                     r = urllib.request.Request(f"https://www.youtube.com/watch?v={video_id}", headers={'User-Agent': 'Mozilla/5.0'})
                     c = urllib.request.urlopen(r).read().decode('utf-8')
-                    m = re.search(r'ytInitialPlayerResponse\s*=\s*({.+?})\s*;\s*(?:var|</script>)', c)
+                    m = re.search(r'ytInitialPlayerResponse\\s*=\\s*({.+?})\\s*;\\s*(?:var|</script>)', c)
                     if m:
                         p = json.loads(m.group(1))
                         cap = p.get('captions', {}).get('playerCaptionsTracklistRenderer', {}).get('captionTracks', [])
@@ -62,9 +57,7 @@ class handler(BaseHTTPRequestHandler):
             if not transcript_text: raise Exception("No Transcript")
 
             model = genai.GenerativeModel('gemini-1.5-flash')
-            prompt = f"Summarize this in English:\
-\
-{transcript_text}"
+            prompt = f"Summarize this YouTube transcript in English: {transcript_text}"
             response = model.generate_content(prompt)
             
             self.send_response(200)
