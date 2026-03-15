@@ -1,84 +1,51 @@
 from http.server import BaseHTTPRequestHandler
-import json
-import re
+import json, re, google.generativeai as genai
 from youtube_transcript_api import YouTubeTranscriptApi
-import google.generativeai as genai
+genai.configure(api_key="AIzaSyDLNs8RHW0ZZF7a17gIZrL_Y1X82qbY_2o")
 
-# Hardcoded API Key
-api_key = "AIzaSyDLNs8RHW0ZZF7a17gIZrL_Y1X82qbY_2o"
-genai.configure(api_key=api_key)
-
-def extract_video_id(url):
-    pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
-    match = re.search(pattern, url)
-    return match.group(1) if match else None
+def extract(url):
+    m = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url)
+    return m.group(1) if m else None
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data) if post_data else {}
-        except Exception as e:
-            self.send_error_response(400, f"Invalid JSON: {str(e)}")
-            return
-
-        url = data.get('url', '')
-        video_id = extract_video_id(url)
-        if not video_id:
-            self.send_error_response(400, 'Invalid URL')
-            return
-            
-        transcript_text = None
-        try:
-            # TRY Extraction
+            l = int(self.headers.get('Content-Length', 0))
+            d = json.loads(self.rfile.read(l)) if l > 0 else {}
+            v = extract(d.get('url', ''))
+            if not v: raise Exception("Invalid URL")
+            t = ""
             try:
-                ts = YouTubeTranscriptApi.list_transcripts(video_id)
-                try:
-                    transcript_text = " ".join([i['text'] for i in ts.find_manually_created_transcript(['en']).fetch()])
-                except:
-                    transcript_text = " ".join([i['text'] for i in list(ts)[0].fetch()])
+                ts = YouTubeTranscriptApi.list_transcripts(v)
+                try: t = " ".join([i['text'] for i in ts.find_manually_created_transcript(['en']).fetch()])
+                except: t = " ".join([i['text'] for i in list(ts)[0].fetch()])
             except:
-                try:
-                    transcript_text = " ".join([i['text'] for i in YouTubeTranscriptApi.get_transcript(video_id)])
+                try: t = " ".join([i['text'] for i in YouTubeTranscriptApi.get_transcript(v)])
                 except:
-                    import urllib.request
-                    import html
-                    r = urllib.request.Request(f"https://www.youtube.com/watch?v={video_id}", headers={'User-Agent': 'Mozilla/5.0'})
-                    c = urllib.request.urlopen(r).read().decode('utf-8')
-                    m = re.search(r'ytInitialPlayerResponse\\s*=\\s*({.+?})\\s*;\\s*(?:var|</script>)', c)
+                    import urllib.request as ur, html
+                    c = ur.urlopen(ur.Request(f"https://www.youtube.com/watch?v={v}", headers={'User-Agent': 'Mozilla/5.0'})).read().decode('utf-8')
+                    m = re.search(r'ytInitialPlayerResponse\s*=\s*({.+?})\s*;', c)
                     if m:
                         p = json.loads(m.group(1))
-                        cap = p.get('captions', {}).get('playerCaptionsTracklistRenderer', {}).get('captionTracks', [])
-                        if cap:
-                            xml = urllib.request.urlopen(cap[0]['baseUrl']).read().decode('utf-8')
-                            transcript_text = " ".join([html.unescape(re.sub(r'<[^>]+>', '', t)) for t in re.findall(r'<text[^>]*>(.*?)</text>', xml)])
-
-            if not transcript_text: raise Exception("No Transcript")
-
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            prompt = f"Summarize this YouTube transcript in English: {transcript_text}"
-            response = model.generate_content(prompt)
-            
+                        tr = p.get('captions', {}).get('playerCaptionsTracklistRenderer', {}).get('captionTracks', [])
+                        if tr: t = " ".join([html.unescape(re.sub(r'<[^>]+>', '', x)) for x in re.findall(r'<text[^>]*>(.*?)</text>', ur.urlopen(tr[0]['baseUrl']).read().decode('utf-8'))])
+            if not t: raise Exception("No transcript available")
+            m = genai.GenerativeModel('gemini-1.5-flash')
+            s = m.generate_content(f"Summarize this YouTube transcript: {t[:30000]}").text
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            self.wfile.write(json.dumps({'summary': response.text}).encode('utf-8'))
-            
+            self.wfile.write(json.dumps({'summary': s}).encode())
         except Exception as e:
-            self.send_error_response(500, str(e))
-            
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': str(e)}).encode())
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
-
-    def send_error_response(self, status, msg):
-        self.send_response(status)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(json.dumps({'error': msg}).encode('utf-8'))
