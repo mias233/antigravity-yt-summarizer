@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Antigravity YouTube Summarizer - Extract knowledge instantly.">
+    <title>Antigravity YouTube Summarizer</title>
+    <!-- Modern font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Markdown parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        /* Modern Glassmorphism & Dark Mode UI */
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #818cf8;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+        
+        * { box-sizing: border-box; }
+        
+        body {
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+            background-image: radial-gradient(circle at top right, rgba(99, 102, 241, 0.15), transparent 400px),
+                              radial-gradient(circle at bottom left, rgba(168, 85, 247, 0.15), transparent 400px);
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            margin-top: 4rem;
+        }
+
+        h1 {
+            font-size: 3rem;
+            text-align: center;
+            background: linear-gradient(to right, #38bdf8, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.025em;
+        }
+
+        p.subtitle {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 3rem;
+            font-size: 1.1rem;
+        }
+
+        .glass-panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: 1.5rem;
+            padding: 2.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+            transition: transform 0.3s ease;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        input[type="url"] {
+            flex: 1;
+            padding: 1rem 1.5rem;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            color: white;
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        input[type="url"]:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.2);
+        }
+
+        button {
+            padding: 1rem 2rem;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            border: none;
+            border-radius: 0.75rem;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -5px rgba(168, 85, 247, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .loader {
+            display: none;
+            text-align: center;
+            margin: 3rem 0;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-left-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        #result-container {
+            display: none;
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border);
+            animation: fadeIn 0.5s ease;
+        }
+
+        .markdown-body {
+            line-height: 1.8;
+            color: #d1d5db;
+            font-size: 1.05rem;
+        }
+
+        .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+            color: var(--text-main);
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        .markdown-body h1 { border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+        .markdown-body ul, .markdown-body ol { padding-left: 1.5rem; margin-bottom: 1.5rem; }
+        .markdown-body li { margin-bottom: 0.5rem; }
+        .markdown-body p { margin-bottom: 1.5rem; }
+        .markdown-body strong { color: #f8fafc; }
+
+        .error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            padding: 1rem 1.5rem;
+            border-radius: 0.75rem;
+            margin-top: 1rem;
+            display: none;
+            animation: fadeIn 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        @media (max-width: 600px) {
+            .input-group { flex-direction: column; }
+            button { width: 100%; justify-content: center; }
+            h1 { font-size: 2.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Antigravity Summarizer</h1>
+        <p class="subtitle">Extract knowledge from YouTube instantly.</p>
+        
+        <div class="glass-panel">
+            <div class="input-group">
+                <input type="url" id="youtube-url" placeholder="Paste YouTube URL here (e.g., https://youtube.com/watch?v=...)" required autocomplete="off">
+                <button id="summarize-btn">
+                    <span>✨ Summarize</span>
+                </button>
+            </div>
+            
+            <div id="error-box" class="error" style="display: none;"></div>
+            
+            <div id="loader" class="loader">
+                <div class="spinner"></div>
+                <p style="color: var(--text-muted);">Extracting transcript and generating summary...</p>
+            </div>
+            
+            <div id="result-container">
+                <div id="summary-content" class="markdown-body"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const btn = document.getElementById('summarize-btn');
+        const input = document.getElementById('youtube-url');
+        const loader = document.getElementById('loader');
+        const resultContainer = document.getElementById('result-container');
+        const summaryContent = document.getElementById('summary-content');
+        const errorBox = document.getElementById('error-box');
+
+        btn.addEventListener('click', async () => {
+            const url = input.value.trim();
+            if (!url) {
+                showError('⚠️ Please enter a valid YouTube URL');
+                return;
+            }
+
+            // Reset UI State
+            errorBox.style.display = 'none';
+            resultContainer.style.display = 'none';
+            loader.style.display = 'block';
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳ Processing...</span>';
+
+            try {
+                const response = await fetch('/api/summarize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to summarize video');
+                }
+
+                // Parse standard markdown
+                summaryContent.innerHTML = marked.parse(data.summary);
+                resultContainer.style.display = 'block';
+                
+            } catch (err) {
+                showError('❌ ' + err.message);
+            } finally {
+                loader.style.display = 'none';
+                btn.disabled = false;
+                btn.innerHTML = '<span>✨ Summarize</span>';
+            }
+        });
+
+        // Allow pressing Enter to submit
+        input.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                btn.click();
+            }
+        });
+
+        function showError(msg) {
+            errorBox.textContent = msg;
+            errorBox.style.display = 'flex';
+        }
+    </script>
+</body>
+</html>
