@@ -10,7 +10,7 @@ genai.configure(api_key=api_key)
 
 def extract_video_id(url):
     """Extract YouTube video ID from various URL formats."""
-    pattern = r'(?:v=|/)([0-9A-Za-z_-]{11}).*'
+    pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
     match = re.search(pattern, url)
     return match.group(1) if match else None
 
@@ -53,30 +53,31 @@ class handler(BaseHTTPRequestHandler):
                     transcript_text = get_text(transcript_list.find_generated_transcript(['en']).fetch())
                 except:
                     try:
-                        # 3. Try to translate ANY manual transcript to English
+                        # 3. Just grab ANY manual transcript
                         manual_transcripts = [t for t in transcript_list if not t.is_generated]
                         if manual_transcripts:
                             first_manual = manual_transcripts[0]
-                            transcript_text = get_text(first_manual.translate('en').fetch())
+                            transcript_text = get_text(first_manual.fetch())
                         else:
-                            # 4. Try to translate ANY auto-generated transcript to English
+                            # 4. Just grab ANY auto-generated transcript
                             generated_transcripts = [t for t in transcript_list if t.is_generated]
                             if generated_transcripts:
                                 first_gen = generated_transcripts[0]
-                                transcript_text = get_text(first_gen.translate('en').fetch())
+                                transcript_text = get_text(first_gen.fetch())
                             else:
                                 raise Exception("No transcripts found.")
                     except Exception as e:
-                        raise Exception(f"Failed to translate transcript: {str(e)}")
+                        raise Exception(f"Failed to extract transcript: {str(e)}")
 
             
             # 2. Summarize using Gemini
             model = genai.GenerativeModel('gemini-1.5-flash')
             prompt = f"""
             You are an expert content summarizer. Below is the transcript of a YouTube video. 
+            Note: The transcript might be in a foreign language. YOU MUST PROCESS IT AND OUTPUT YOUR RESPONSE IN ENGLISH.
             
-            1. First, provide a concise, well-formatted summary of the key takeaways using bullet points.
-            2. Then, generate exactly 3 insightful follow-up prompts or questions that the user can ask you to dive deeper into the video's topic. Format them clearly under the heading "### Follow-up Prompts".
+            1. First, provide a concise, well-formatted summary of the key takeaways IN ENGLISH using bullet points.
+            2. Then, generate exactly 3 insightful follow-up prompts or questions IN ENGLISH that the user can ask you to dive deeper into the video's topic. Format them clearly under the heading "### Follow-up Prompts".
             
             Transcript:
             {transcript_text}
