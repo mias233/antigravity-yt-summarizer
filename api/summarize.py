@@ -10,7 +10,7 @@ genai.configure(api_key=api_key)
 
 def extract_video_id(url):
     """Extract YouTube video ID from various URL formats."""
-    pattern = r'(?:v=|/)([0-9A-Za-z_-]{11}).*'
+    pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
     match = re.search(pattern, url)
     return match.group(1) if match else None
 
@@ -66,10 +66,34 @@ class handler(BaseHTTPRequestHandler):
                                 transcript_text = get_text(first_gen.fetch())
                             else:
                                 raise Exception("No transcripts found.")
-                    except Exception as e:
-                        raise Exception(f"Failed to extract transcript: {str(e)}")
-
-            
+                    except Exception as yt_api_e:
+                        # 5. ULTIMATE FALLBACK: Custom Scraper
+                        import urllib.request
+                        import html as html_lib
+                        
+                        req = urllib.request.Request(f"https://www.youtube.com/watch?v={video_id}", headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+                        html_content = urllib.request.urlopen(req).read().decode('utf-8')
+                        
+                        match = re.search(r'ytInitialPlayerResponse\s*=\s*({.+?})\s*;\s*(?:var|</script>)', html_content)
+                        if not match:
+                            raise Exception(f"Failed to extract transcript via Fallback (No player response). Original error: {str(yt_api_e)}")
+                        
+                        player_resp = json.loads(match.group(1))
+                        captions = player_resp.get('captions', {}).get('playerCaptionsTracklistRenderer', {}).get('captionTracks', [])
+                        
+                        if not captions:
+                            raise Exception(f"Failed to extract transcript via Fallback (No captions track found). Original error: {str(yt_api_e)}")
+                            
+                        baseUrl = captions[0]['baseUrl']
+                        xml_data = urllib.request.urlopen(baseUrl).read().decode('utf-8')
+                        match_texts = re.findall(r'<text[^>]*>(.*?)</text>', xml_data)
+                        
+                        if not match_texts:
+                            raise Exception(f"Failed to extract transcript via Fallback (No text in XML). Original error: {str(yt_api_e)}")
+                            
+                        # Clean up formatting
+                        transcript_text = " ".join([html_lib.unescape(re.sub(r'<[^>]+>', '', t)) for t in match_texts])
+                        
             # 2. Summarize using Gemini
             model = genai.GenerativeModel('gemini-1.5-flash')
             prompt = f"""
@@ -116,4 +140,4 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        self.wfile.write(json.dumps({'error': message}).encode('utf-8'))
+        self.wfile.write(json.dumps({'error': message}).encode('utf-8'));
