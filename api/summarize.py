@@ -36,108 +36,94 @@ class handler(BaseHTTPRequestHandler):
             self.send_error_response(400, 'Invalid YouTube URL. Could not extract the video ID.')
             return
             
+        transcript_text = None
         try:
-            # 1. Extract Transcript
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            
-            # Helper to extract text
-            def get_text(t_fetch):
-                return " ".join([i['text'] for i in t_fetch])
-
+            # TRY Extraction
             try:
-                # 1. Try to find a manually created English transcript
-                transcript_text = get_text(transcript_list.find_manually_created_transcript(['en', 'en-US', 'en-GB']).fetch())
-            except:
+                # Attempt 1: Standard API
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                # Helper to extract text
+                def get_text(t_fetch):
+                    return " ".join([i['text'] for i in t_fetch])
+
                 try:
-                    # 2. Try to find an auto-generated English transcript
-                    transcript_text = get_text(transcript_list.find_generated_transcript(['en']).fetch())
+                    # 1. English Manual
+                    transcript_text = get_text(transcript_list.find_manually_created_transcript(['en', 'en-US', 'en-GB']).fetch())
                 except:
                     try:
-                        # 3. Just grab ANY manual transcript
-                        manual_transcripts = [t for t in transcript_list if not t.is_generated]
-                        if manual_transcripts:
-                            first_manual = manual_transcripts[0]
-                            transcript_text = get_text(first_manual.fetch())
+                        # 2. English Auto
+                        transcript_text = get_text(transcript_list.find_generated_transcript(['en']).fetch())
+                    except:
+                        # 3. Any Manual
+                        manuals = [t for t in transcript_list if not t.is_generated]
+                        if manuals:
+                            transcript_text = get_text(manuals[0].fetch())
                         else:
-                            # 4. Just grab ANY auto-generated transcript
-                            generated_transcripts = [t for t in transcript_list if t.is_generated]
-                            if generated_transcripts:
-                                first_gen = generated_transcripts[0]
-                                transcript_text = get_text(first_gen.fetch())
+                            # 4. Any Generated
+                            gens = [t for t in transcript_list if t.is_generated]
+                            if gens:
+                                transcript_text = get_text(gens[0].fetch())
                             else:
-                                raise Exception("No transcripts found.")
-                    except Exception as yt_api_e:
-                        # 5. ULTIMATE FALLBACK: Custom Scraper
-                        import urllib.request
-                        import html as html_lib
-                        
-                        req = urllib.request.Request(f"https://www.youtube.com/watch?v={video_id}", headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-                        html_content = urllib.request.urlopen(req).read().decode('utf-8')
-                        
-                        match = re.search(r'ytInitialPlayerResponse\s*=\s*({.+?})\s*;\s*(?:var|</script>)', html_content)
-                        if not match:
-                            raise Exception(f"Failed to extract transcript via Fallback (No player response). Original error: {str(yt_api_e)}")
-                        
-                        player_resp = json.loads(match.group(1))
-                        captions = player_resp.get('captions', {}).get('playerCaptionsTracklistRenderer', {}).get('captionTracks', [])
-                        
-                        if not captions:
-                            raise Exception(f"Failed to extract transcript via Fallback (No captions track found). Original error: {str(yt_api_e)}")
-                            
-                        baseUrl = captions[0]['baseUrl']
-                        xml_data = urllib.request.urlopen(baseUrl).read().decode('utf-8')
-                        match_texts = re.findall(r'<text[^>]*>(.*?)</text>', xml_data)
-                        
-                        if not match_texts:
-                            raise Exception(f"Failed to extract transcript via Fallback (No text in XML). Original error: {str(yt_api_e)}")
-                            
-                        # Clean up formatting
-                        transcript_text = " ".join([html_lib.unescape(re.sub(r'<[^>]+>', '', t)) for t in match_texts])
-                        
-            # 2. Summarize using Gemini
+                                raise Exception("No transcripts available via API.")
+            except Exception as e1:
+                # Attempt 2: Basic get_transcript fallback
+                try:
+                    transcript_fetch = YouTubeTranscriptApi.get_transcript(video_id)
+                    transcript_text = " ".join([i['text'] for i in transcript_fetch])
+                except Exception as e2:
+                    # Attempt 3: ULTIMATE FALLBACK (Custom Scraper)
+                    import urllib.request
+                    import html as html_lib
+                    
+                    req = urllib.request.Request(f"https://www.youtube.com/watch?v={video_id}", headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+                    html_content = urllib.request.urlopen(req).read().decode('utf-8')
+                    
+                    match = re.search(r'ytInitialPlayerResponse\s*=\s*({.+?})\s*;\s*(?:var|</script>)', html_content)
+                    if not match: raise Exception("No Transcript Found (Fallback Case 1)")
+                    
+                    player_resp = json.loads(match.group(1))
+                    captions = player_resp.get('captions', {}).get('playerCaptionsTracklistRenderer', {}).get('captionTracks', [])
+                    if not captions: raise Exception("No Transcript Found (Fallback Case 2)")
+                    
+                    xml_data = urllib.request.urlopen(captions[0]['baseUrl']).read().decode('utf-8')
+                    texts = re.findall(r'<text[^>]*>(.*?)</text>', xml_data)
+                    if not texts: raise Exception("No Transcript Found (Fallback Case 3)")
+                    
+                    transcript_text = " ".join([html_lib.unescape(re.sub(r'<[^>]+>', '', t)) for t in texts])
+
+            if not transcript_text:
+                raise Exception("Could not retrieve transcript from any source.")
+
+            # 2. Summarize
             model = genai.GenerativeModel('gemini-1.5-flash')
-            prompt = f"""
-            You are an expert content summarizer. Below is the transcript of a YouTube video. 
-            Note: The transcript might be in a foreign language. YOU MUST PROCESS IT AND OUTPUT YOUR RESPONSE IN ENGLISH.
-            
-            1. First, provide a concise, well-formatted summary of the key takeaways IN ENGLISH using bullet points.
-            2. Then, generate exactly 3 insightful follow-up prompts or questions IN ENGLISH that the user can ask you to dive deeper into the video's topic. Format them clearly under the heading "### Follow-up Prompts".
-            
-            Transcript:
-            {transcript_text}
-            """
-            
+            prompt = f"Summarize this YouTube transcript in English with key takeaways and follow-up questions:
+ 
+{transcript_text}"
             response = model.generate_content(prompt)
             
-            # Send Success Response
+            # Send Success
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            
-            response_json = json.dumps({'summary': response.text})
-            self.wfile.write(response_json.encode('utf-8'))
+            self.wfile.write(json.dumps({'summary': response.text}).encode('utf-8'))
             
         except Exception as e:
-            error_msg = str(e)
-            if "TranscriptsDisabled" in error_msg or "Subtitles are disabled" in error_msg or "No transcripts" in error_msg or "Could not retrieve a transcript" in error_msg:
-                error_msg = "The creator of this video has disabled third-party transcript access, or no subtitles exist. Please try a different video."
-            else:
-                error_msg = f"An error occurred: {error_msg}"
-                
-            self.send_error_response(500, error_msg)
+            msg = str(e)
+            if any(term in msg for term in ["TranscriptsDisabled", "Subtitles are disabled", "No Transcript Found"]):
+                msg = "The creator of this video has disabled third-party transcript access, or no subtitles exist. Please try a different video."
+            self.send_error_response(500, msg)
             
     def do_OPTIONS(self):
-        # Handle CORS preflight requests
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
-    def send_error_response(self, status_code, message):
-        self.send_response(status_code)
+    def send_error_response(self, status, message):
+        self.send_response(status)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        self.wfile.write(json.dumps({'error': message}).encode('utf-8'));
+        self.wfile.write(json.dumps({'error': message}).encode('utf-8'))
