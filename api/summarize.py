@@ -10,7 +10,7 @@ genai.configure(api_key=api_key)
 
 def extract_video_id(url):
     """Extract YouTube video ID from various URL formats."""
-    pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
+    pattern = r'(?:v=|/)([0-9A-Za-z_-]{11}).*'
     match = re.search(pattern, url)
     return match.group(1) if match else None
 
@@ -38,27 +38,37 @@ class handler(BaseHTTPRequestHandler):
             
         try:
             # 1. Extract Transcript
-            try:
-                # Fast path: Try common English codes first
-                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US', 'en-GB', 'en-IN', 'en-CA'])
-            except:
-                # Fallback: List all transcripts, pick the first one, and translate to English
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                available_tracks = [t for t in transcript_list]
-                
-                if not available_tracks:
-                    raise Exception("No transcripts found at all.")
-                
-                first_track = available_tracks[0]
-                
-                if first_track.language_code.startswith('en'):
-                    transcript = first_track.fetch()
-                else:
-                    # Translate non-English transcript to English using YouTube's built-in translation
-                    transcript = first_track.translate('en').fetch()
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            
+            # Helper to extract text
+            def get_text(t_fetch):
+                return " ".join([i['text'] for i in t_fetch])
 
-            # Format transcript to text
-            transcript_text = " ".join([t['text'] for t in transcript])
+            try:
+                # 1. Try to find a manually created English transcript
+                transcript_text = get_text(transcript_list.find_manually_created_transcript(['en', 'en-US', 'en-GB']).fetch())
+            except:
+                try:
+                    # 2. Try to find an auto-generated English transcript
+                    transcript_text = get_text(transcript_list.find_generated_transcript(['en']).fetch())
+                except:
+                    try:
+                        # 3. Try to translate ANY manual transcript to English
+                        manual_transcripts = [t for t in transcript_list if not t.is_generated]
+                        if manual_transcripts:
+                            first_manual = manual_transcripts[0]
+                            transcript_text = get_text(first_manual.translate('en').fetch())
+                        else:
+                            # 4. Try to translate ANY auto-generated transcript to English
+                            generated_transcripts = [t for t in transcript_list if t.is_generated]
+                            if generated_transcripts:
+                                first_gen = generated_transcripts[0]
+                                transcript_text = get_text(first_gen.translate('en').fetch())
+                            else:
+                                raise Exception("No transcripts found.")
+                    except Exception as e:
+                        raise Exception(f"Failed to translate transcript: {str(e)}")
+
             
             # 2. Summarize using Gemini
             model = genai.GenerativeModel('gemini-1.5-flash')
@@ -77,7 +87,6 @@ class handler(BaseHTTPRequestHandler):
             # Send Success Response
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
-            # Add CORS headers if necessary
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             
